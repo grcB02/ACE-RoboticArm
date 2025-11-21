@@ -49,7 +49,8 @@ void set_interval(float new_interval)
 
 typedef struct{
   float angle_x, angle_y, angle_z;
-}datas;
+  float bias_x = 0.0f, bias_y = 0.0f, bias_z = 0.0f;
+} datas;
 
 typedef struct {
   Vec3f w;
@@ -60,18 +61,46 @@ typedef struct {
 imu_values_t imu;
 datas data_imu;
 
+void calibrateGyroBias()
+{
+  // Call this during setup while sensor is stationary
+  float sum_x = 0, sum_y = 0, sum_z = 0;
+  int samples = 100;
+  
+  for(int i = 0; i < samples; i++) {
+    if(mpu.update()) {
+      sum_x += mpu.getGyroX();
+      sum_y += mpu.getGyroY();
+      sum_z += mpu.getGyroZ();
+      delay(10);
+    }
+  }
+  
+  data_imu.bias_x = sum_x / samples;
+  data_imu.bias_y = sum_y / samples;
+  data_imu.bias_z = sum_z / samples;
+
+  data_imu.angle_x = 0;
+  data_imu.angle_y = 0;
+  data_imu.angle_z = 0;
+}
+
 void getAngle()
 {
   uint32_t dt_us = imu.cycle_time - imu.last_cycle_time;
   float dt = (dt_us == 0) ? (interval * 1e-6f) : ((float)dt_us * 1e-6f);
 
-  data_imu.angle_x += imu.w.x * dt; 
-  data_imu.angle_y += imu.w.y * dt;
-  data_imu.angle_z += imu.w.z * dt;
+  float data_imu.angle_x = data_imu.angle_x + (imu.w.x - data_imu.bias_x) * dt;
+  float data_imu.angle_y = data_imu.angle_y + (imu.w.y - data_imu.bias_y) * dt;
+  float data_imu.angle_z = data_imu.angle_z + (imu.w.z - data_imu.bias_z) * dt;
 
-  if(data_imu.angle_x > 360) data_imu.angle_x = 0;
-  if(data_imu.angle_y > 360) data_imu.angle_y = 0;
-  if(data_imu.angle_z > 360) data_imu.angle_z = 0;
+  // Normalize angles to 0-360 range
+  while(data_imu.angle_x > 180.0f) data_imu.angle_x -= 360.0f;
+  while(data_imu.angle_x < -180.0f) data_imu.angle_x += 360.0f;
+  while(data_imu.angle_y > 180.0f) data_imu.angle_y -= 360.0f;
+  while(data_imu.angle_y < -180.0f) data_imu.angle_y += 360.0f;
+  while(data_imu.angle_z > 360.0f) data_imu.angle_z -= 360.0f;
+  while(data_imu.angle_z < 0.0f) data_imu.angle_z += 360.0f;
 }
 
 void setup() 
@@ -134,9 +163,13 @@ void setup()
   // Clear the buffer
   display.clearDisplay();
 
-  data_imu.angle_x = 0;
-  data_imu.angle_y = 0;
-  data_imu.angle_z = 0;
+  // Calibrate gyro bias before starting
+  Serial.println("\n=== Calibrating gyro bias ===");
+  Serial.println("Keep sensor still for 2 seconds...");
+  delay(1000);
+  calibrateGyroBias();
+  Serial.println("=== Calibration complete ===\n");
+  delay(500);
 }
 
 void loop() 
