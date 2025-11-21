@@ -60,12 +60,18 @@ typedef struct {
 imu_values_t imu;
 datas data_imu;
 
-void getAngle(){
+void getAngle()
+{
+  uint32_t dt_us = imu.cycle_time - imu.last_cycle_time;
+  float dt = (dt_us == 0) ? (interval * 1e-6f) : ((float)dt_us * 1e-6f);
 
-  data_imu.angle_x += imu.w.x*interval;
-  data_imu.angle_y += imu.w.y*interval;
-  data_imu.angle_z += imu.w.z*interval;
+  data_imu.angle_x += imu.w.x * dt; 
+  data_imu.angle_y += imu.w.y * dt;
+  data_imu.angle_z += imu.w.z * dt;
 
+  if(data_imu.angle_x > 360) data_imu.angle_x = 0;
+  if(data_imu.angle_y > 360) data_imu.angle_y = 0;
+  if(data_imu.angle_z > 360) data_imu.angle_z = 0;
 }
 
 void setup() 
@@ -183,6 +189,12 @@ void loop()
     display.printf("Ay %.2f", imu.a.y);
     display.setCursor(64, 16);
     display.printf("Az %.2f", imu.a.z);
+    display.setCursor(0,36);
+    display.printf("Angulo_X %.2f", data_imu.angle_x);
+    display.setCursor(0,44);
+    display.printf("Angulo_Y %.2f", data_imu.angle_y);
+    display.setCursor(0,52);
+    display.printf("Angulo_Z %.2f", data_imu.angle_z);
 
     display.display();
 
@@ -201,8 +213,6 @@ void loop()
     Serial.printf("Angulo_y : %.2f", data_imu.angle_y);
     Serial.printf("Angulo_z : %.2f", data_imu.angle_z);
 
-    //Serial.print("T ");
-    //Serial.print(mpu.getTemperature(), 2);
 
     Serial.print("loop ");
     Serial.print(micros() - now);
