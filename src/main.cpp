@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
+#include <cmath> // Include cmath for fabsf, sqrtf, and M_PI
 
 #include <VectorXf.h>
 
@@ -13,7 +14,7 @@ MPU6500 mpu;
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
 
-#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_RESET      -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 #define SCREEN_ADDRESS 0x3C // See datasheet for Address
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire1, OLED_RESET, 3400000, 400000);
 
@@ -45,12 +46,20 @@ uint32_t cycle_count;
 void set_interval(float new_interval)
 {
   interval = new_interval * 1000000L;   // In microseconds
-}  
+}   
 
 typedef struct{
   float angle_x, angle_y, angle_z;
   float bias_x = 0.0f, bias_y = 0.0f, bias_z = 0.0f;
 } datas;
+
+// Complementary Filter coefficient (0.0 to 1.0)
+// Higher = more gyro trust, lower = more accel correction
+const float ALPHA = 1.00f;
+
+// *** NEW CONSTANT: Unified Threshold for all Gyro axes (in degrees/second) ***
+// Below this magnitude, the gyro integration is skipped/frozen.
+const float GYRO_THRESHOLD = 1.0f; 
 
 typedef struct {
   Vec3f w;
@@ -65,21 +74,26 @@ void calibrateGyroBias()
 {
   // Call this during setup while sensor is stationary
   float sum_x = 0, sum_y = 0, sum_z = 0;
+  float acc_sum_x = 0, acc_sum_y = 0, acc_sum_z = 0;
   int samples = 100;
   
   for(int i = 0; i < samples; i++) {
-    if(mpu.update()) {
+    // Only count a successful update as a sample
+    if(mpu.update()) { 
       sum_x += mpu.getGyroX();
       sum_y += mpu.getGyroY();
       sum_z += mpu.getGyroZ();
       delay(10);
+    } else {
+        // If update fails, retry this sample index
+        i--;
     }
   }
-  
   data_imu.bias_x = sum_x / samples;
   data_imu.bias_y = sum_y / samples;
   data_imu.bias_z = sum_z / samples;
-
+  
+  // Angle initialization
   data_imu.angle_x = 0;
   data_imu.angle_y = 0;
   data_imu.angle_z = 0;
@@ -87,20 +101,58 @@ void calibrateGyroBias()
 
 void getAngle()
 {
-  uint32_t dt_us = imu.cycle_time - imu.last_cycle_time;
-  float dt = (dt_us == 0) ? (interval * 1e-6f) : ((float)dt_us * 1e-6f);
+  // Use the nominal loop interval for filter calculations (fixed dt)
+  float dt = interval * 1e-6f; 
 
-  float data_imu.angle_x = data_imu.angle_x + (imu.w.x - data_imu.bias_x) * dt;
-  float data_imu.angle_y = data_imu.angle_y + (imu.w.y - data_imu.bias_y) * dt;
-  float data_imu.angle_z = data_imu.angle_z + (imu.w.z - data_imu.bias_z) * dt;
+  // Corrected Gyro Rates (degrees/second)
+  float corrected_gyro_x = imu.w.x - data_imu.bias_x;
+  float corrected_gyro_y = imu.w.y - data_imu.bias_y;
+  float corrected_gyro_z = imu.w.z - data_imu.bias_z; 
+  
+  // Integrated gyro angles (defaults to 0 if below threshold)
+  float gyro_angle_x = 0.0f;
+  float gyro_angle_y = 0.0f;
+  float gyro_angle_z = 0.0f;
 
-  // Normalize angles to 0-360 range
+  // *** THRESHOLD IMPLEMENTATION FOR ALL AXES ***
+  
+  // 1. Roll (X-axis)
+  if (fabsf(corrected_gyro_x) > GYRO_THRESHOLD) {
+      gyro_angle_x = corrected_gyro_x * dt;
+  }
+  
+  // 2. Pitch (Y-axis)
+  if (fabsf(corrected_gyro_y) > GYRO_THRESHOLD) {
+      gyro_angle_y = corrected_gyro_y * dt;
+  }
+  
+  // 3. Yaw (Z-axis)
+  if (fabsf(corrected_gyro_z) > GYRO_THRESHOLD) {
+      gyro_angle_z = corrected_gyro_z * dt;
+  }
+  
+  // Accelerometer angle calculation (Roll and Pitch)
+  float accel_angle_x = atan2f(imu.a.y, sqrtf(imu.a.x*imu.a.x + imu.a.z*imu.a.z)) * 180.0f / M_PI;
+  float accel_angle_y = atan2f(-imu.a.x, sqrtf(imu.a.y * imu.a.y + imu.a.z * imu.a.z)) * 180.0f / M_PI;
+
+  // Complementary Filter for Roll (X) and Pitch (Y)
+  // If gyro_angle_x/y is 0, the filter uses the gyro angle of the previous cycle 
+  // combined with the accelerometer correction.
+  data_imu.angle_x = ALPHA * (data_imu.angle_x + gyro_angle_x) + (1.0f - ALPHA) * accel_angle_x;
+  data_imu.angle_y = ALPHA * (data_imu.angle_y + gyro_angle_y) + (1.0f - ALPHA) * accel_angle_y;
+  
+  // Pure Gyro Integration for Yaw (Z)
+  data_imu.angle_z = data_imu.angle_z + gyro_angle_z; 
+  
+  // Angle wrapping to [-180, 180] degrees
   while(data_imu.angle_x > 180.0f) data_imu.angle_x -= 360.0f;
   while(data_imu.angle_x < -180.0f) data_imu.angle_x += 360.0f;
+  
   while(data_imu.angle_y > 180.0f) data_imu.angle_y -= 360.0f;
   while(data_imu.angle_y < -180.0f) data_imu.angle_y += 360.0f;
-  while(data_imu.angle_z > 360.0f) data_imu.angle_z -= 360.0f;
-  while(data_imu.angle_z < 0.0f) data_imu.angle_z += 360.0f;
+
+  while(data_imu.angle_z > 180.0f) data_imu.angle_z -= 360.0f;
+  while(data_imu.angle_z < -180.0f) data_imu.angle_z += 360.0f;
 }
 
 void setup() 
@@ -152,7 +204,7 @@ void setup()
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   while(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
     Serial.println("SSD1306 allocation failed");
-    delay(500);  // Wait to try again
+    delay(500);   // Wait to try again
   }
 
   // Show initial display buffer contents on the screen --
@@ -169,6 +221,9 @@ void setup()
   delay(1000);
   calibrateGyroBias();
   Serial.println("=== Calibration complete ===\n");
+  
+  Serial.printf("Gyro Bias X: %.4f, Y: %.4f, Z: %.4f\n", 
+                data_imu.bias_x, data_imu.bias_y, data_imu.bias_z);
   delay(500);
 }
 
@@ -208,15 +263,15 @@ void loop()
     // OLED output
     display.clearDisplay();
 
-    display.setTextSize(1);      // Normal 1:1 pixel scale
+    display.setTextSize(1);       // Normal 1:1 pixel scale
     display.setTextColor(SSD1306_WHITE); // Draw white text
-    display.setCursor(0, 0);     // Start at top-left corner
+    display.setCursor(0, 0);      // Start at top-left corner
     
     display.printf("Wx %.2f\n", imu.w.x);
     display.printf("Wy %.2f\n", imu.w.y);
     display.printf("Wz %.2f\n", imu.w.z);
 
-    display.setCursor(64, 0);     // Start at top-left corner
+    display.setCursor(64, 0);      // Start at top-left corner
     display.printf("Ax %.2f", imu.a.x);
     display.setCursor(64, 8);
     display.printf("Ay %.2f", imu.a.y);
@@ -254,4 +309,3 @@ void loop()
   }
 
 }
-
