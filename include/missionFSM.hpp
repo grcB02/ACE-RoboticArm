@@ -2,23 +2,10 @@
 #include <string>
 
 #include "IOman.hpp"
+#include "system_data.hpp"
 
 
-enum mission_type{
-    OFF,
-    COLOR_SORTING_KNOWN,
-    COLOR_SORTING_UNKNOWN,
-    SOLVE_HANOI,
-    OPERATION_MODE_SELECTED
-};
 
-enum mission_state {
-    OFF,
-    ready,
-    in_progress,
-    cpompleted,
-    error,
-};
 
 
 // Classe FSM para gerir estado  das missões

@@ -16,3 +16,19 @@ struct volatile_data
 {
     
 };
+
+enum mission_type{
+    OFF,
+    COLOR_SORTING_KNOWN,
+    COLOR_SORTING_UNKNOWN,
+    SOLVE_HANOI,
+    OPERATION_MODE_SELECTED
+};
+
+enum mission_state {
+    OFF,
+    ready,
+    in_progress,
+    cpompleted,
+    error,
+};
