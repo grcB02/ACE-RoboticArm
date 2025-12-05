@@ -1,43 +1,15 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <cmath> // Include cmath for fabsf, sqrtf, and M_PI
 
-#include <VectorXf.h>
+#include <Servo.h>
+#include <Adafruit_PWMServoDriver.h>
 
-#include "MPU6500_Raw.h"
-MPU6500 mpu;
-
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-
-#define SCREEN_WIDTH 128 // OLED display width, in pixels
-#define SCREEN_HEIGHT 64 // OLED display height, in pixels
-
-#define OLED_RESET      -1 // Reset pin # (or -1 if sharing Arduino reset pin)
-#define SCREEN_ADDRESS 0x3C // See datasheet for Address
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire1, OLED_RESET, 3400000, 400000);
-
-
-#define LOGO_HEIGHT   16
-#define LOGO_WIDTH    16
-static const unsigned char PROGMEM logo_bmp[] =
-{ 0b00000000, 0b11000000,
-  0b00000001, 0b11000000,
-  0b00000001, 0b11000000,
-  0b00000011, 0b11100000,
-  0b11110011, 0b11100000,
-  0b11111110, 0b11111000,
-  0b01111110, 0b11111111,
-  0b00110011, 0b10011111,
-  0b00011111, 0b11111100,
-  0b00001101, 0b01110000,
-  0b00011011, 0b10100000,
-  0b00111111, 0b11100000,
-  0b00111111, 0b11110000,
-  0b01111100, 0b11110000,
-  0b01110000, 0b01110000,
-  0b00000000, 0b00110000 };
+#define SERVOMIN  150 // This is the 'minimum' pulse length count (out of 4096)
+#define SERVOMAX  600 // This is the 'maximum' pulse length count (out of 4096)
+#define USMIN  600 // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
+#define USMAX  2400 // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
+#define SERVO_FREQ 50 // Analog servos run at ~50 Hz updates
 
 uint32_t interval, last_cycle;
 uint32_t loop_micros;
@@ -48,264 +20,67 @@ void set_interval(float new_interval)
   interval = new_interval * 1000000L;   // In microseconds
 }   
 
-typedef struct{
-  float angle_x, angle_y, angle_z;
-  float bias_x = 0.0f, bias_y = 0.0f, bias_z = 0.0f;
-} datas;
+Adafruit_PWMServoDriver input_servos = Adafruit_PWMServoDriver();
+Servo myservo;
 
-// Complementary Filter coefficient (0.0 to 1.0)
-// Higher = more gyro trust, lower = more accel correction
-const float ALPHA = 1.00f;
-
-// *** NEW CONSTANT: Unified Threshold for all Gyro axes (in degrees/second) ***
-// Below this magnitude, the gyro integration is skipped/frozen.
-const float GYRO_THRESHOLD = 1.0f; 
-
-typedef struct {
-  Vec3f w;
-  Vec3f a;
-  uint32_t cycle_time, last_cycle_time; // IMU cycle tracking
-} imu_values_t;
-
-imu_values_t imu;
-datas data_imu;
-
-void calibrateGyroBias()
-{
-  // Call this during setup while sensor is stationary
-  float sum_x = 0, sum_y = 0, sum_z = 0;
-  float acc_sum_x = 0, acc_sum_y = 0, acc_sum_z = 0;
-  int samples = 100;
-  
-  for(int i = 0; i < samples; i++) {
-    // Only count a successful update as a sample
-    if(mpu.update()) { 
-      sum_x += mpu.getGyroX();
-      sum_y += mpu.getGyroY();
-      sum_z += mpu.getGyroZ();
-      delay(10);
-    } else {
-        // If update fails, retry this sample index
-        i--;
-    }
-  }
-  data_imu.bias_x = sum_x / samples;
-  data_imu.bias_y = sum_y / samples;
-  data_imu.bias_z = sum_z / samples;
-  
-  // Angle initialization
-  data_imu.angle_x = 0;
-  data_imu.angle_y = 0;
-  data_imu.angle_z = 0;
-}
-
-void getAngle()
-{
-  // Use the nominal loop interval for filter calculations (fixed dt)
-  float dt = interval * 1e-6f; 
-
-  // Corrected Gyro Rates (degrees/second)
-  float corrected_gyro_x = imu.w.x - data_imu.bias_x;
-  float corrected_gyro_y = imu.w.y - data_imu.bias_y;
-  float corrected_gyro_z = imu.w.z - data_imu.bias_z; 
-  
-  // Integrated gyro angles (defaults to 0 if below threshold)
-  float gyro_angle_x = 0.0f;
-  float gyro_angle_y = 0.0f;
-  float gyro_angle_z = 0.0f;
-
-  // *** THRESHOLD IMPLEMENTATION FOR ALL AXES ***
-  
-  // 1. Roll (X-axis)
-  if (fabsf(corrected_gyro_x) > GYRO_THRESHOLD) {
-      gyro_angle_x = corrected_gyro_x * dt;
-  }
-  
-  // 2. Pitch (Y-axis)
-  if (fabsf(corrected_gyro_y) > GYRO_THRESHOLD) {
-      gyro_angle_y = corrected_gyro_y * dt;
-  }
-  
-  // 3. Yaw (Z-axis)
-  if (fabsf(corrected_gyro_z) > GYRO_THRESHOLD) {
-      gyro_angle_z = corrected_gyro_z * dt;
-  }
-  
-  // Accelerometer angle calculation (Roll and Pitch)
-  float accel_angle_x = atan2f(imu.a.y, sqrtf(imu.a.x*imu.a.x + imu.a.z*imu.a.z)) * 180.0f / M_PI;
-  float accel_angle_y = atan2f(-imu.a.x, sqrtf(imu.a.y * imu.a.y + imu.a.z * imu.a.z)) * 180.0f / M_PI;
-
-  // Complementary Filter for Roll (X) and Pitch (Y)
-  // If gyro_angle_x/y is 0, the filter uses the gyro angle of the previous cycle 
-  // combined with the accelerometer correction.
-  data_imu.angle_x = ALPHA * (data_imu.angle_x + gyro_angle_x) + (1.0f - ALPHA) * accel_angle_x;
-  data_imu.angle_y = ALPHA * (data_imu.angle_y + gyro_angle_y) + (1.0f - ALPHA) * accel_angle_y;
-  
-  // Pure Gyro Integration for Yaw (Z)
-  data_imu.angle_z = data_imu.angle_z + gyro_angle_z; 
-  
-  // Angle wrapping to [-180, 180] degrees
-  while(data_imu.angle_x > 180.0f) data_imu.angle_x -= 360.0f;
-  while(data_imu.angle_x < -180.0f) data_imu.angle_x += 360.0f;
-  
-  while(data_imu.angle_y > 180.0f) data_imu.angle_y -= 360.0f;
-  while(data_imu.angle_y < -180.0f) data_imu.angle_y += 360.0f;
-
-  while(data_imu.angle_z > 180.0f) data_imu.angle_z -= 360.0f;
-  while(data_imu.angle_z < -180.0f) data_imu.angle_z += 360.0f;
-}
+uint8_t servonum = 12;
 
 void setup() 
 {
-  // Builtin LED
-  pinMode(LED_BUILTIN, OUTPUT);
+  input_servos.begin();
 
   Serial.begin(115200);
 
   // Our cycle time
   set_interval(20e-3); // 20 ms -> 50 Hz
+  input_servos.setOscillatorFrequency(27000000);
+  input_servos.setPWMFreq(SERVO_FREQ);  // Analog servos run at ~50 Hz updates
 
-  // IMU initalization
-  const int I2C0_SDA = 20;
-  const int I2C0_SCL = 21;
-  pinMode(I2C0_SDA, INPUT_PULLUP);
-  pinMode(I2C0_SCL, INPUT_PULLUP);
-  
-  Wire.setSDA(I2C0_SDA);
-  Wire.setSCL(I2C0_SCL);
-  Wire.begin();
-  
-  delay(20);
-  
-  MPU6500Setting setting;
-  setting.accel_fs_sel = ACCEL_FS_SEL::A16G;
-  setting.gyro_fs_sel = GYRO_FS_SEL::G2000DPS;
-  setting.fifo_sample_rate = FIFO_SAMPLE_RATE::SMPL_200HZ;
-  setting.gyro_fchoice = 0x03;
-  setting.gyro_dlpf_cfg = GYRO_DLPF_CFG::DLPF_41HZ;
-  setting.accel_fchoice = 0x01;
-  setting.accel_dlpf_cfg = ACCEL_DLPF_CFG::DLPF_45HZ;
-  
-  while (!mpu.setup(0x68, setting)) { 
-    Serial.println("MPU connection failed.");
-    delay(500); // Wait to try again     
-  }
+  delay(10);
+}
 
-  // OLED initalization
-  const int I2C1_SDA = 18;
-  const int I2C1_SCL = 19;
-  pinMode(I2C1_SDA, INPUT_PULLUP);
-  pinMode(I2C1_SCL, INPUT_PULLUP);
+void setServoPulse(uint8_t n, double pulse) {
+  double pulselength;
   
-  Wire1.setSDA(I2C1_SDA);
-  Wire1.setSCL(I2C1_SCL);
-  Wire1.begin();
-
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  while(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
-    Serial.println("SSD1306 allocation failed");
-    delay(500);   // Wait to try again
-  }
-
-  // Show initial display buffer contents on the screen --
-  // the library initializes this with an Adafruit splash screen.
-  display.display();
-  delay(2000); // Pause for 2 seconds
-
-  // Clear the buffer
-  display.clearDisplay();
-
-  // Calibrate gyro bias before starting
-  Serial.println("\n=== Calibrating gyro bias ===");
-  Serial.println("Keep sensor still for 2 seconds...");
-  delay(1000);
-  calibrateGyroBias();
-  Serial.println("=== Calibration complete ===\n");
-  
-  Serial.printf("Gyro Bias X: %.4f, Y: %.4f, Z: %.4f\n", 
-                data_imu.bias_x, data_imu.bias_y, data_imu.bias_z);
-  delay(500);
+  pulselength = 1000000;   // 1,000,000 us per second
+  pulselength /= SERVO_FREQ;   // Analog servos run at ~60 Hz updates
+  Serial.print(pulselength); Serial.println(" us per period"); 
+  pulselength /= 4096;  // 12 bits of resolution
+  Serial.print(pulselength); Serial.println(" us per bit"); 
+  pulse *= 1000000;  // convert input seconds to us
+  pulse /= pulselength;
+  Serial.println(pulse);
+  input_servos.setPWM(n, 0, pulse);
 }
 
 void loop() 
 {
-  uint8_t b;
-  if (Serial.available()) {  // Only do this if there is serial data to be read
-  
-    b = Serial.read();    
-    //Serial.write(b);
-  } 
-
-  // Do this only every "interval" microseconds 
-  uint32_t now = micros();
-  uint32_t delta = now - last_cycle; 
-  if (delta >= interval) {
-    loop_micros = micros();
-    last_cycle = now;
-    cycle_count++;
-
-    // Read, if ready, the MPU
-    if (mpu.update()) {
-      imu.last_cycle_time = imu.cycle_time;
-      imu.cycle_time = micros();
-
-      imu.w.x = mpu.getGyroX();
-      imu.w.y = mpu.getGyroY();
-      imu.w.z = mpu.getGyroZ();
-
-      imu.a.x = mpu.getAccX();
-      imu.a.y = mpu.getAccY();
-      imu.a.z = mpu.getAccZ();
-    }
-    
-    getAngle();
-
-    // OLED output
-    display.clearDisplay();
-
-    display.setTextSize(1);       // Normal 1:1 pixel scale
-    display.setTextColor(SSD1306_WHITE); // Draw white text
-    display.setCursor(0, 0);      // Start at top-left corner
-    
-    display.printf("Wx %.2f\n", imu.w.x);
-    display.printf("Wy %.2f\n", imu.w.y);
-    display.printf("Wz %.2f\n", imu.w.z);
-
-    display.setCursor(64, 0);      // Start at top-left corner
-    display.printf("Ax %.2f", imu.a.x);
-    display.setCursor(64, 8);
-    display.printf("Ay %.2f", imu.a.y);
-    display.setCursor(64, 16);
-    display.printf("Az %.2f", imu.a.z);
-    display.setCursor(0,36);
-    display.printf("Angulo_X %.2f", data_imu.angle_x);
-    display.setCursor(0,44);
-    display.printf("Angulo_Y %.2f", data_imu.angle_y);
-    display.setCursor(0,52);
-    display.printf("Angulo_Z %.2f", data_imu.angle_z);
-
-    display.display();
-
-    // Serial output
-    Serial.printf("IMU_dt %d; ", imu.cycle_time - imu.last_cycle_time);
-
-    Serial.printf("Wx %.2f; ", imu.w.x);
-    Serial.printf("Wy %.2f; ", imu.w.y);
-    Serial.printf("Wz %.2f; ", imu.w.z);
-
-    Serial.printf("Ax %.2f; ", imu.a.x);
-    Serial.printf("Ay %.2f; ", imu.a.y);
-    Serial.printf("Az %.2f; ", imu.a.z);
-
-    Serial.printf("Angulo_x : %.2f", data_imu.angle_x);
-    Serial.printf("Angulo_y : %.2f", data_imu.angle_y);
-    Serial.printf("Angulo_z : %.2f", data_imu.angle_z);
-
-
-    Serial.print("loop ");
-    Serial.print(micros() - now);
-
-    Serial.println();
+ Serial.println(servonum);
+  for (uint16_t pulselen = SERVOMIN; pulselen < SERVOMAX; pulselen++) {
+    input_servos.setPWM(servonum, 0, pulselen);
   }
+
+  delay(500);
+  for (uint16_t pulselen = SERVOMAX; pulselen > SERVOMIN; pulselen--) {
+    input_servos.setPWM(servonum, 0, pulselen);
+  }
+
+  delay(500);
+
+  // Drive each servo one at a time using writeMicroseconds(), it's not precise due to calculation rounding!
+  // The writeMicroseconds() function is used to mimic the Arduino Servo library writeMicroseconds() behavior. 
+  for (uint16_t microsec = USMIN; microsec < USMAX; microsec++) {
+    input_servos.writeMicroseconds(servonum, microsec);
+  }
+
+  delay(500);
+  for (uint16_t microsec = USMAX; microsec > USMIN; microsec--) {
+    input_servos.writeMicroseconds(servonum, microsec);
+  }
+
+  delay(500);
+
+  servonum++;
+  if (servonum > 15) servonum = 12; //testar os 4 servos do braço
 
 }
