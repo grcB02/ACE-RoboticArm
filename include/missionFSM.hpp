@@ -26,8 +26,8 @@ enum class FSMMission_state {
 class FSM_mission {
 private:
     // Referências guardadas para uso interno na FSM
-    IOman &io;           // <--- 3. Variável para guardar a referência
-    system_data &data;   // <--- 3. Variável para guardar a referência
+    IOman &io;          
+    system_data &data;   
 
     FSMMission_type current_mission;
     FSMMission_type new_mission;

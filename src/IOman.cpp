@@ -1,7 +1,11 @@
 #include "IOman.hpp"
 
-class IOman {
-private:
+
+
+
+
+
+
     void IOman::read_sensors(){
         // Implementação da leitura dos sensores
     };
@@ -23,7 +27,7 @@ private:
     update_motor3() 
     */
     
-public:
+
     IOman(system_data data, volatile_data v_data, MotorController &motor_controller);
     void IOman::update_data(){
         read_sensors();
@@ -44,4 +48,4 @@ public:
     };
 
     
-};
+
