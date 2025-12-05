@@ -2,6 +2,7 @@
 //dados atualizados, debounced, flancos e assim ,basicamente dados para usarmos
 struct system_data {
     bool Sok=0;
+    bool Snext=0;
 
 
 };

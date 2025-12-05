@@ -6,61 +6,54 @@ FSM_mission::FSM_mission(IOman &io_manager, system_data &data_ref)
     : io(io_manager), data(data_ref) 
 {
     // Definir estados iniciais seguros
-    current_mission = mission_type::NONE_SELECTED;
-    current_mission_state = mission_state::OFF;
-    next_state = mission_state::OFF;
+    current_mission = FSMMission_type::NONE_SELECTED;
+    current_mission_state = FSMMission_state::OFF;
+    next_state = FSMMission_state::OFF;
 }
 
 // 2. Adicionado FSM_mission:: antes do nome da função
-void FSM_mission::set_state(mission_state new_state){
+void FSM_mission::set_state(FSMMission_state new_state){
     current_mission_state = new_state;
 }
 
 // 3. Adicionado 'const' para bater certo com o cabeçalho (se lá tiver const)
 // e adicionado o FSM_mission::
-mission_state FSM_mission::get_current_state() const { 
+FSMMission_state FSM_mission::get_current_state() { 
     return current_mission_state; 
 }
 
-mission_type FSM_mission::get_current_mission() const { 
+FSMMission_type FSM_mission::get_current_mission() { 
     return current_mission; 
 }
 
-void FSM_mission::update_fsm(){
-    // 4. O switch deve ser sobre o ESTADO, não sobre a missão
-    switch (current_mission_state)
+//UPDATE MISSION
+void FSM_mission::update_mission(){
+    
+    switch (current_mission)
     {
-    case OFF:
+    case FSMMission_type::NONE_SELECTED:
         // Exemplo: Se carregou no botão de Start (Sok)
         if(data.Sok){
-            next_state = mission_type::COLOR_SORTING_KNOWN; // Usar nomes corrigidos (Maiúsculas)
-        } else {
-            next_state = mission_type::NONE_SELECTED;
-        }
+            new_mission = FSMMission_type::COLOR_SORTING_KNOWN; // Usar nomes corrigidos (Maiúsculas)
+        } 
         break;
 
-    case READY:
-        // Lógica de preparação...
-        next_state = mission_type::COLOR_SORTING_UNKNOWN;
+    case FSMMission_type::COLOR_SORTING_KNOWN:
         break;
 
-    case IN_PROGRESS:
-        // Lógica principal...
+    case FSMMission_type::COLOR_SORTING_UNKNOWN:
+
         break;
 
-    case COMPLETED: // Corrigido erro ortográfico 'cpompleted'
-        /* code */
+    case FSMMission_type::SOLVE_HANOI: // Corrigido erro ortográfico 'cpompleted'
+        
         break;
 
-    case ERROR_STATE:
+    case FSMMission_type::OPERATION_MODE_SELECTED:
         /* code */
         break;      
-    
-    default:
-        next_state = ERROR_STATE;
-        break;
-    }
 
     // Atualizar o estado efetivamente
-    set_state(next_state);    
+    set_mission(new_mission);
+    }    
 }

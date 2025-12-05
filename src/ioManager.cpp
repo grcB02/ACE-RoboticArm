@@ -26,8 +26,6 @@ imu_values_t imu;
 datas data_imu;
 
 float angle_update(imu_values_t imu){
-
-
    if (mpu.update()) {
       imu.last_cycle_time = imu.cycle_time;
       imu.cycle_time = micros();
@@ -44,4 +42,8 @@ float angle_update(imu_values_t imu){
         //printf("mpu has not updated yet");
         return 0;
     }
+
+
+
+
 }
