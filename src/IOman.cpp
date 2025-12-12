@@ -1,5 +1,10 @@
 #include "IOman.hpp"
 
+#define SDA_PIN 2  
+#define SCL_PIN 3  
+
+
+
 void IOman::read_sensors() {
     // Implementação da leitura dos sensores
 }
@@ -38,11 +43,11 @@ void IOman::set_motor_angle(int motor_id, float angle) {
     ServoDriver.setPWM(motor_id, 0, angle);
 }
 
-void setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver)
+void IOman::setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver)
 {
     // Definir pinos usados para I2C (RP2040 / Arduino compatível)
-    Wire.setSDA(8);
-    Wire.setSCL(9);
+    Wire.setSDA(SDA_PIN);
+    Wire.setSCL(SCL_PIN);
 
     Wire.begin();
 
@@ -61,4 +66,13 @@ void setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver)
     driver.setPWMFreq(50);
 
     delay(10);
+}
+
+void IOman::setup_servos(Adafruit_PWMServoDriver &driver) {
+
+    driver.begin();
+  driver.setOscillatorFrequency(28000000);
+  driver.setPWMFreq(50);  // Analog servos run at ~50 Hz updates (20 ms period)
+  delay(10);
+
 }

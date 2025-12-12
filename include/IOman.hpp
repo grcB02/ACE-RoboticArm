@@ -24,6 +24,10 @@ public:
     void set_motor_angle(int motor_id, float angle);
     void setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver);
 
+    void setup_servos(Adafruit_PWMServoDriver &driver);
+    void setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver);
+
+
 
     system_data sys_data;
 };

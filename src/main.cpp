@@ -43,6 +43,29 @@ uint32_t interval, last_cycle;
 uint32_t loop_micros;
 uint32_t cycle_count;
 
+
+int angle_to_pulse(int angle)
+{
+    // Limitar ângulo entre 0 e 180
+    if (angle < 0) angle = 0;
+    if (angle > 180) angle = 180;
+
+    // --- Ajusta aqui conforme o teu servo ---
+    float pulse_min_ms = 1.0;   // Pulso mínimo (ms) → posição 0°
+    float pulse_max_ms = 2.0;   // Pulso máximo (ms) → posição 180°
+    // ----------------------------------------
+
+    float period_ms = 20.0;     // 50Hz → 20 ms por ciclo
+
+    // Converter ângulo 0–180 para pulso em ms
+    float pulse_ms = pulse_min_ms + (angle / 180.0) * (pulse_max_ms - pulse_min_ms);
+
+    // Converter ms para valor 0–4095
+    int pulse_value = (pulse_ms / period_ms) * 4096;
+
+    return pulse_value;
+}
+
 void set_interval(float new_interval)
 {
   interval = new_interval * 1000000L;   // In microseconds
