@@ -10,6 +10,7 @@ MPU6500 mpu;
 
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Adafruit_PWMServoDriver.h>
 
 #define SCREEN_WIDTH 128 // OLED display width, in pixels
 #define SCREEN_HEIGHT 64 // OLED display height, in pixels
@@ -42,6 +43,48 @@ static const unsigned char PROGMEM logo_bmp[] =
 uint32_t interval, last_cycle;
 uint32_t loop_micros;
 uint32_t cycle_count;
+
+Adafruit_PWMServoDriver ServoDriver = Adafruit_PWMServoDriver();
+
+
+void setup_servos(Adafruit_PWMServoDriver &driver) {
+
+    driver.begin();
+  driver.setOscillatorFrequency(28000000);
+  driver.setPWMFreq(50);  // Analog servos run at ~50 Hz updates (20 ms period)
+  delay(10);
+
+}
+
+void setup_I2C_PCA9685(Adafruit_PWMServoDriver &driver)
+{
+    // Definir pinos usados para I2C (RP2040 / Arduino compatível)
+    Wire.setSDA(SDA_PIN);
+    Wire.setSCL(SCL_PIN);
+
+    Wire.begin();
+
+    // Tentar encontrar o PCA9685
+    while (!driver.begin()) {
+        Serial.println("Erro: PCA9685 não encontrado! Verifica as ligações.");
+        delay(200);
+    }
+
+    Serial.println("PCA9685 encontrado.");
+
+    /*
+    // Ajustar a frequência interna
+    driver.setOscillatorFrequency(28000000);
+
+    // Frequência típica dos servos (20 ms → ~50 Hz)
+    driver.setPWMFreq(50);
+
+    //isto está repetido na função setup_servos, depois ver como é melhor organizar
+
+    */
+
+    delay(10);
+}
 
 
 int angle_to_pulse(int angle)
